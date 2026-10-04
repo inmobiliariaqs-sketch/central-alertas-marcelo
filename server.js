@@ -2,6 +2,7 @@ const express = require("express");
 
 const app = express();
 app.use(express.json());
+require('./chatgpt-mcp')(app);
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "central_alertas_marcelo_2026";
 
