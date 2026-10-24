@@ -4,20 +4,40 @@ const { z } = require('zod');
 
 module.exports = function conectarChatGPT(app) {
   app.post('/mcp', async (req, res) => {
-    const server = new McpServer({ name: 'central-alertas-marcelo', version: '1.0.1' });
+    const server = new McpServer({ name: 'central-alertas-marcelo', version: '1.0.2' });
     server.registerTool('estado_central', {
       description: 'Comprueba el enlace con Central de Alertas Marcelo sin enviar mensajes.',
       inputSchema: {},
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-    }, async () => ({ content: [{ type: 'text', text: JSON.stringify({
-      transporte: 'conectado',
-      proveedor: 'Meta WhatsApp Cloud API',
-      destino_fijo: '+34 635453445',
-      configuracion: { token_presente: Boolean(process.env.WHATSAPP_TOKEN), numero_emisor_presente: Boolean(process.env.PHONE_NUMBER_ID) },
-      envio_verificado: false,
-      entrega_verificada: false,
-      version: '1.0.1'
-    }) }] }));
+    }, async () => {
+      const diagnostic = {
+        transporte: 'conectado',
+        proveedor: 'Meta WhatsApp Cloud API',
+        destino_fijo: '+34 635453445',
+        configuracion: { token_presente: Boolean(process.env.WHATSAPP_TOKEN), numero_emisor_presente: Boolean(process.env.PHONE_NUMBER_ID) },
+        envio_verificado: false,
+        entrega_verificada: false,
+        version: '1.0.2'
+      };
+      if (diagnostic.configuracion.token_presente && diagnostic.configuracion.numero_emisor_presente) {
+        try {
+          const response = await fetch(`https://graph.facebook.com/v26.0/${encodeURIComponent(process.env.PHONE_NUMBER_ID)}?fields=id`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` },
+            signal: AbortSignal.timeout(5000)
+          });
+          const result = await response.json();
+          diagnostic.consulta_proveedor = { metodo: 'GET_sin_envio', acceso_emisor_verificado: response.ok && Boolean(result.id), http_status: response.status };
+          if (!response.ok) {
+            diagnostic.consulta_proveedor.codigo = result.error?.code;
+            diagnostic.consulta_proveedor.subcodigo = result.error?.error_subcode;
+          }
+        } catch (_) {
+          diagnostic.consulta_proveedor = { metodo: 'GET_sin_envio', acceso_emisor_verificado: false, respuesta_no_disponible: true };
+        }
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(diagnostic) }] };
+    });
     server.registerTool('enviar_alerta', {
       title: 'Enviar alerta al WhatsApp de Marcelo',
       description: 'Envía una alerta solicitada por Marcelo a su WhatsApp personal mediante POST /alerta. Úsala para entregar el texto de una alerta o recordatorio autorizado.',
