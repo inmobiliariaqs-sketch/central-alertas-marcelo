@@ -1,4 +1,5 @@
 const express = require("express");
+const { randomUUID } = require("node:crypto");
 
 const app = express();
 app.use(express.json());
@@ -42,19 +43,23 @@ app.post("/webhook", (req, res) => {
 // =====================================================
 
 app.post("/alerta", async (req, res) => {
+  const requestId = randomUUID();
+  console.log("alert_request", JSON.stringify({ request_id: requestId }));
   try {
     const mensaje = req.body.mensaje;
 
-    if (!mensaje) {
+    if (typeof mensaje !== "string" || !mensaje.trim() || mensaje.length > 4096) {
       return res.status(400).json({
         ok: false,
-        error: "Falta el campo mensaje"
+        request_id: requestId,
+        error: "El campo mensaje debe ser texto entre 1 y 4096 caracteres"
       });
     }
 
     if (!WHATSAPP_TOKEN) {
       return res.status(500).json({
         ok: false,
+        request_id: requestId,
         error: "Falta WHATSAPP_TOKEN"
       });
     }
@@ -62,6 +67,7 @@ app.post("/alerta", async (req, res) => {
     if (!PHONE_NUMBER_ID) {
       return res.status(500).json({
         ok: false,
+        request_id: requestId,
         error: "Falta PHONE_NUMBER_ID"
       });
     }
@@ -70,6 +76,7 @@ app.post("/alerta", async (req, res) => {
       `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
       {
         method: "POST",
+        signal: AbortSignal.timeout(12000),
         headers: {
           Authorization: `Bearer ${WHATSAPP_TOKEN}`,
           "Content-Type": "application/json"
@@ -90,28 +97,34 @@ app.post("/alerta", async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Error de WhatsApp:", data);
+      console.error("whatsapp_rejected", JSON.stringify({ request_id: requestId, http_status: response.status, code: data.error?.code, subcode: data.error?.error_subcode, trace_id: data.error?.fbtrace_id }));
 
       return res.status(response.status).json({
         ok: false,
-        error: data
+        request_id: requestId,
+        error: { message: "WhatsApp rechazó la solicitud", code: data.error?.code, subcode: data.error?.error_subcode, trace_id: data.error?.fbtrace_id }
       });
     }
 
-    console.log("ALERTA ENVIADA A MARCELO:", mensaje);
+    console.log("whatsapp_accepted", JSON.stringify({ request_id: requestId, message_id: data.messages?.[0]?.id }));
 
     return res.status(200).json({
       ok: true,
+      request_id: requestId,
+      estado: "aceptado_por_proveedor_no_confirma_entrega",
       enviado_a: MARCELO_WHATSAPP,
-      whatsapp: data
+      whatsapp: { messages: (data.messages || []).map(item => ({ id: item.id })) }
     });
 
   } catch (error) {
-    console.error("Error enviando alerta:", error);
+    console.error("whatsapp_outcome_unknown", JSON.stringify({ request_id: requestId, error_name: error.name }));
 
     return res.status(500).json({
       ok: false,
-      error: error.message
+      request_id: requestId,
+      resultado_incierto: true,
+      reintentar_automaticamente: false,
+      error: "No se pudo verificar la respuesta de WhatsApp; no reenviar automáticamente"
     });
   }
 });
