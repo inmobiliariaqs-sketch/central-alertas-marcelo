@@ -4,12 +4,20 @@ const { z } = require('zod');
 
 module.exports = function conectarChatGPT(app) {
   app.post('/mcp', async (req, res) => {
-    const server = new McpServer({ name: 'central-alertas-marcelo', version: '1.0.0' });
+    const server = new McpServer({ name: 'central-alertas-marcelo', version: '1.0.1' });
     server.registerTool('estado_central', {
       description: 'Comprueba el enlace con Central de Alertas Marcelo sin enviar mensajes.',
       inputSchema: {},
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-    }, async () => ({ content: [{ type: 'text', text: 'Central de Alertas Marcelo conectada. Destino fijo: +34 635453445.' }] }));
+    }, async () => ({ content: [{ type: 'text', text: JSON.stringify({
+      transporte: 'conectado',
+      proveedor: 'Meta WhatsApp Cloud API',
+      destino_fijo: '+34 635453445',
+      configuracion: { token_presente: Boolean(process.env.WHATSAPP_TOKEN), numero_emisor_presente: Boolean(process.env.PHONE_NUMBER_ID) },
+      envio_verificado: false,
+      entrega_verificada: false,
+      version: '1.0.1'
+    }) }] }));
     server.registerTool('enviar_alerta', {
       title: 'Enviar alerta al WhatsApp de Marcelo',
       description: 'Envía una alerta solicitada por Marcelo a su WhatsApp personal mediante POST /alerta. Úsala para entregar el texto de una alerta o recordatorio autorizado.',
@@ -21,12 +29,12 @@ module.exports = function conectarChatGPT(app) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mensaje }),
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(15000)
         });
         const result = await response.json();
         return { isError: !response.ok || result.ok !== true, content: [{ type: 'text', text: JSON.stringify(result) }] };
       } catch (error) {
-        return { isError: true, content: [{ type: 'text', text: error.message }] };
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify({ resultado_incierto: true, reintentar_automaticamente: false, error: 'No se obtuvo respuesta del servicio; no reenviar automáticamente' }) }] };
       }
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
